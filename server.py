@@ -14,7 +14,8 @@ CAND = ['BTC', 'ETH', 'SOL', 'XRP', 'BNB', 'DOGE', 'ADA', 'TRX', 'TON', 'AVAX', 
         'WLD', 'TIA', 'SEI', 'ONDO', 'TRUMP', 'HYPE', 'BTW']
 SYMS = list(CAND)  # narrowed to what OKX actually lists after the first fetch
 QUOTE = 'USDT'
-GATE_SPOT = {'BTW': 'BTW_USDT'}   # OKX 无现货、改走 Gate 行情的币：sym -> Gate currency_pair
+GATE_SPOT = {'BTW': 'BTW_USDT'}   # OKX 无现货、改走 Gate 现货行情的币：sym -> Gate currency_pair
+GATE_FUT = {'BTW': 'BTW_USDT'}    # OKX 无永续、改走 Gate 合约行情的币：sym -> Gate contract
 INIT = 1000000.0
 SPOT_MAKER, SPOT_TAKER = 0.0008, 0.001     # OKX regular-user spot fees
 SWAP_MAKER, SWAP_TAKER = 0.0002, 0.0005    # OKX regular-user USDT-swap fees
@@ -26,7 +27,7 @@ SESSION_DAYS = 30
 LB_INTERVAL = 30
 LD_CLIENT_ID = os.environ.get('LD_CLIENT_ID', '')
 LD_CLIENT_SECRET = os.environ.get('LD_CLIENT_SECRET', '')
-PUBLIC_URL = os.environ.get('PUBLIC_URL', 'https://aws.linyesantan.top').rstrip('/')
+PUBLIC_URL = os.environ.get('PUBLIC_URL', 'http://127.0.0.1:8300').rstrip('/')
 CK = '; HttpOnly; SameSite=Lax' + ('; Secure' if PUBLIC_URL.startswith('https') else '')
 LD_MIN_TL = int(os.environ.get('LD_MIN_TL', '1'))
 LD_AUTH = 'https://connect.linux.do/oauth2/authorize'
@@ -462,6 +463,17 @@ def load_instruments():
                            'min': fnum(gi.get('min_base_amount')) or lot}
         except Exception as e:
             log.warning('gate instruments %s failed: %s', pair, e)
+    for s, contract in GATE_FUT.items():
+        try:
+            gc = gate_get('/api/v4/futures/usdt/contracts/' + contract)
+            if str(gc.get('status')) == 'trading':
+                ct = fnum(gc.get('quanto_multiplier'), 1.0)
+                swap[s] = {'tick': fnum(gc.get('order_price_round')), 'ct': ct,
+                           'lot': (fnum(gc.get('order_size_round')) or 1.0) * ct,
+                           'min': fnum(gc.get('order_size_min'), 1.0) * ct,
+                           'okx_lev': int(fnum(gc.get('leverage_max'), 0))}
+        except Exception as e:
+            log.warning('gate fut instruments %s failed: %s', contract, e)
     if spot:
         INST['spot'] = spot
     if swap:
@@ -542,6 +554,19 @@ def fetch_okx():
                 v['fr'], v['nft'] = f['rate'], int(f['time'] * 1000)
     except Exception as e:
         log.warning('swap tickers failed: %s', e)
+    for s, contract in GATE_FUT.items():
+        try:
+            t = gate_get('/api/v4/futures/usdt/tickers?contract=' + contract)
+            t = t[0] if isinstance(t, list) and t else (t or {})
+            last, bid, ask = fnum(t.get('last')), fnum(t.get('highest_bid')), fnum(t.get('lowest_ask'))
+            if bid > 0 and ask >= bid and last > 0:
+                chg = fnum(t.get('change_percentage')) / 100.0
+                swap[s] = {'bid': bid, 'ask': ask, 'last': last, 'chg': chg,
+                           'o': last / (1 + chg) if chg > -1 else last,
+                           'h': fnum(t.get('high_24h')), 'l': fnum(t.get('low_24h')), 'v': fnum(t.get('volume_24h_quote')),
+                           'mark': fnum(t.get('mark_price')) or (bid + ask) / 2}
+        except Exception as e:
+            log.warning('gate fut ticker %s failed: %s', contract, e)
     return spot, swap
 
 
@@ -668,6 +693,10 @@ def book(kind, sym, after=None):
             d = gate_get('/api/v4/spot/order_book?currency_pair=%s&limit=100' % GATE_SPOT[sym])
             conv = lambda L: [[float(p), float(z)] for p, z in L]
             return {'ts': int(d.get('current') or time.time() * 1000), 'asks': conv(d['asks']), 'bids': conv(d['bids'])}
+        if kind == 'swap' and sym in GATE_FUT:
+            d = gate_get('/api/v4/futures/usdt/order_book?contract=%s&limit=100' % GATE_FUT[sym])
+            conv = lambda L: [[float(x['p']), float(x['s']) * ct] for x in L]
+            return {'ts': int(float(d.get('current') or time.time()) * 1000), 'asks': conv(d['asks']), 'bids': conv(d['bids'])}
         d = okx_get('/api/v5/market/books?instId=%s&sz=100' % inst_id(kind, sym))[0]
         return {'ts': int(d['ts']), 'asks': [[float(a[0]), float(a[1]) * ct] for a in d['asks']],
                 'bids': [[float(b[0]), float(b[1]) * ct] for b in d['bids']]}
@@ -1509,6 +1538,9 @@ def r_kline(h):
         if kind == 'spot' and s in GATE_SPOT:
             rows = gate_get('/api/v4/spot/candlesticks?currency_pair=%s&interval=%s&limit=300' % (GATE_SPOT[s], GATE_TF[tf]))
             return [[int(r[0]) * 1000, float(r[5]), float(r[3]), float(r[4]), float(r[2]), float(r[6])] for r in rows]
+        if kind == 'swap' and s in GATE_FUT:
+            rows = gate_get('/api/v4/futures/usdt/candlesticks?contract=%s&interval=%s&limit=300' % (GATE_FUT[s], GATE_TF[tf]))
+            return [[int(r['t']) * 1000, float(r['o']), float(r['h']), float(r['l']), float(r['c']), float(r['v']) * ct] for r in rows]
         rows = okx_get('/api/v5/market/candles?instId=%s&bar=%s&limit=300' % (inst_id(kind, s), bar))
         return [[int(r[0]), float(r[1]), float(r[2]), float(r[3]), float(r[4]), float(r[5]) * ct] for r in reversed(rows)]
     return Cached({'sym': s, 'type': kind, 'tf': tf, 'cols': ['t', 'o', 'h', 'l', 'c', 'v'], 'k': cached(('k', kind, s, tf), ttl, fetch)}, min(ttl, 5))
@@ -1532,6 +1564,10 @@ def r_trades(h):
         if kind == 'spot' and s in GATE_SPOT:
             return [[int(t['create_time']) * 1000, float(t['price']), float(t['amount']), t['side']]
                     for t in gate_get('/api/v4/spot/trades?currency_pair=%s&limit=50' % GATE_SPOT[s])]
+        if kind == 'swap' and s in GATE_FUT:
+            return [[int(float(t['create_time']) * 1000), float(t['price']), abs(float(t['size'])) * ct,
+                     'buy' if float(t['size']) > 0 else 'sell']
+                    for t in gate_get('/api/v4/futures/usdt/trades?contract=%s&limit=50' % GATE_FUT[s])]
         return [[int(t['ts']), float(t['px']), float(t['sz']) * ct, t['side']]
                 for t in okx_get('/api/v5/market/trades?instId=%s&limit=50' % inst_id(kind, s))]
     return Cached({'sym': s, 'type': kind, 'cols': ['t', 'px', 'sz', 'side'], 'trades': cached(('t', kind, s), 2, fetch)}, 1)

@@ -65,9 +65,9 @@ cp .env.example .env
 ```
 主要变量说明：
 - `PORT`：后端监听端口（默认 `8300`）
-- `PUBLIC_URL`：外部访问域名（例如 `https://aws.linyesantan.top`）
-- `LD_CLIENT_ID` / `LD_CLIENT_SECRET`：LINUX DO Connect 应用凭据
-- `NL_CLIENT_ID` / `NL_CLIENT_SECRET`：NodeLoc OAuth 凭据（可选）
+- `PUBLIC_URL`：外部访问域名（例如 `https://your-domain.com`）
+- `LD_CLIENT_ID` / `LD_CLIENT_SECRET`：LINUX DO Connect 应用凭据（在 [connect.linux.do](https://connect.linux.do/) 创建应用，回调填 `https://your-domain.com/api/auth/callback`）
+- `NL_CLIENT_ID` / `NL_CLIENT_SECRET`：NodeLoc OAuth 凭据（可选，回调填 `https://your-domain.com/api/auth/nodeloc/callback`）
 
 ### 3. 运行服务
 可以直接启动后端服务：

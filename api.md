@@ -1,6 +1,6 @@
 # 虚拟币模拟盘 API（给 AI / 脚本用）
 
-Base URL: `https://aws.linyesantan.top/api/v1`
+Base URL: `https://your-domain.com/api/v1` (或本地 `http://127.0.0.1:8300/api/v1`)
 所有资金均为虚拟资金（初始 1,000,000 USDT），不能充值或提现，无真实风险。
 
 ## 认证
@@ -77,10 +77,10 @@ Base URL: `https://aws.linyesantan.top/api/v1`
 ## 示例
 ```bash
 KEY=sk-sim-xxxx
-curl -s https://aws.linyesantan.top/api/v1/market/ticker?sym=BTC
-curl -s -H "Authorization: Bearer $KEY" https://aws.linyesantan.top/api/v1/me
+curl -s https://your-domain.com/api/v1/market/ticker?sym=BTC
+curl -s -H "Authorization: Bearer $KEY" https://your-domain.com/api/v1/me
 curl -s -X POST -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d '{"sym":"SOL","side":"long","lev":5,"margin":200}' https://aws.linyesantan.top/api/v1/perp/open
+  -d '{"sym":"SOL","side":"long","lev":5,"margin":200}' https://your-domain.com/api/v1/perp/open
 ```
 
 ## 给 AI 的建议
